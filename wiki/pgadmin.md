@@ -41,7 +41,7 @@ The port number is the value of [`PGADMIN_HOST_PORT`](./dotenv-docker-secret.md#
 ## Open `pgAdmin`
 
 > [!NOTE]
-> The default values are defined in [`.env.docker.example`](../.env.docker.example).
+> The default values are defined in [`.env.docker.example`](../.env.docker.secret).
 >
 > The actual values are in `.env.docker.secret`.
 

@@ -44,7 +44,7 @@
 
 The values are substituted into [`docker-compose.yml`](../docker-compose.yml) when running commands with the `--env-file` flag (e.g., `docker compose --env-file .env.docker.secret up --build`).
 
-Default values: [`.env.docker.example`](../.env.docker.example)
+Default values: [`.env.docker.example`](../.env.docker.secret)
 
 > [!NOTE]
 > It was added to [`.gitignore`](./git.md#gitignore) because you may specify there
@@ -52,7 +52,7 @@ Default values: [`.env.docker.example`](../.env.docker.example)
 
 > [!TIP]
 > No edits are needed for local development.
-> The default values in [`.env.docker.example`](../.env.docker.example) work out of the box.
+> The default values in [`.env.docker.example`](../.env.docker.secret) work out of the box.
 
 ## `app`
 
