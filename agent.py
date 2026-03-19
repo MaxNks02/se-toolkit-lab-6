@@ -5,7 +5,6 @@ import urllib.request
 import urllib.error
 from dotenv import load_dotenv
 
-
 # --- Tool Logic ---
 
 def is_safe_path(base_dir, target_path):
@@ -13,7 +12,6 @@ def is_safe_path(base_dir, target_path):
     abs_base = os.path.abspath(base_dir)
     abs_target = os.path.abspath(os.path.join(base_dir, target_path))
     return abs_target.startswith(abs_base)
-
 
 def list_files(base_dir, path):
     """Lists files in the project structure."""
@@ -25,7 +23,6 @@ def list_files(base_dir, path):
     except Exception as e:
         return f"Error: {e}"
 
-
 def read_file(base_dir, path):
     """Reads file content."""
     if not is_safe_path(base_dir, path): return "Error: Access denied."
@@ -36,7 +33,6 @@ def read_file(base_dir, path):
             return f.read()[:15000]  # Cap read size to prevent context overflow
     except Exception as e:
         return f"Error: {e}"
-
 
 def query_api(method, path, body=None, include_auth=True):
     """Authenticated call to the backend using LMS_API_KEY."""
@@ -125,14 +121,16 @@ def main():
     executed_tool_calls = []
     final_json = None
 
-    for _ in range(10):
+    # Increased loop range from 10 to 15 to allow for deep searching
+    for _ in range(15):
         payload = {"model": model, "messages": messages, "tools": tools}
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
         try:
             req = urllib.request.Request(f"{api_base.rstrip('/')}/chat/completions",
                                          data=json.dumps(payload).encode('utf-8'), headers=headers, method='POST')
-            with urllib.request.urlopen(req, timeout=60) as response:
+            # Increased timeout to 90 seconds
+            with urllib.request.urlopen(req, timeout=90) as response:
                 res_data = json.loads(response.read().decode('utf-8'))
         except Exception as e:
             print(json.dumps({"answer": f"API Error: {e}", "source": None, "tool_calls": executed_tool_calls}))
