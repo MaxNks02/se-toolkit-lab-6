@@ -1,30 +1,36 @@
 # Agent Documentation
 
 ## Overview
-This repository contains a Python-based Command Line Interface (CLI) agent built for Lab 6. In its current implementation (Task 1), it functions as a direct Question-and-Answer tool that connects to a Large Language Model (LLM) to provide answers to user prompts.
+This repository contains a Python-based Command Line Interface (CLI) agent built for Lab 6. It operates as a fully functional documentation agent capable of exploring the project directory to answer user questions.
 
-## How the Agent Works
-The agent operates through a straightforward pipeline without an agentic loop or external tool use (which will be introduced in later tasks):
-1. **Input Parsing:** The agent accepts a single question as a command-line argument.
-2. **Environment Loading:** It securely loads the API credentials and endpoint configuration from a local `.env.agent.secret` file.
-3. **API Request:** It constructs a standard OpenAI-compatible JSON payload and sends a `POST` request to the configured LLM endpoint.
-4. **Execution & Timeout:** The agent waits for the LLM's response, enforcing a strict 60-second timeout limit to prevent hanging.
-5. **Output Formatting:** The agent extracts the assistant's text and formats it into a strict JSON structure. 
-6. **Stream Separation:** To ensure the output is machine-readable, the valid JSON is printed exclusively to `stdout`, while all errors, debug information, or environment logs are routed to `stderr`.
+## Architecture & The Agentic Loop
+Unlike a simple chatbot, this agent utilizes an **agentic loop** to reason and use tools. 
+1. **Initialization:** The user's question and a system prompt are sent to the LLM alongside JSON schemas defining available tools.
+2. **The Loop:** The agent enters a `while` loop (capped at a maximum of 10 iterations to prevent infinite loops).
+   - If the LLM requests a tool call, the local Python script intercepts it, executes the corresponding function, and appends the result to the message history as a `tool` role message.
+   - The updated history is sent back to the LLM.
+3. **Termination:** When the LLM has enough information, it stops calling tools and provides a final text response formatted as a strict JSON object.
+4. **Output:** The script parses the final answer and source, combines them with the log of executed tool calls, and prints the final JSON to `stdout`. All debug information is routed to `stderr`.
+
+## Tools & Security
+The agent is equipped with two tools:
+* **`list_files(path)`:** Lists files and directories at a given relative path.
+* **`read_file(path)`:** Reads the contents of a specified file.
+
+**Security:** Both tools use `os.path.abspath` to verify that the requested path strictly resides within the project root directory, preventing directory traversal attacks (e.g., `../../`).
+
+## System Prompt Strategy
+The system prompt explicitly instructs the LLM to act as a documentation agent, directing it to use `list_files` to discover paths and `read_file` to ingest content. Furthermore, it strictly enforces the final output format, demanding the LLM return only a raw JSON string containing an `answer` and a `source` (file path and section anchor) without Markdown wrappers.
 
 ## LLM Provider Configuration
-This agent is configured to use the **Qwen Code API**, self-hosted on a remote university virtual machine via an OpenAI-compatible proxy.
-
-* **Provider:** Qwen Code API
+* **Provider:** Qwen Code API (self-hosted via proxy on a remote VM)
 * **Model:** `qwen3-coder-plus`
-* **Network:** Hosted on VM IP `10.93.25.214` at port `42005`.
-
-## Usage Instructions
-
+* **Configuration:** Loaded from a local `.env.agent.secret` file.
  
 
 
 To execute the agent, use the `uv` package manager from the root of the project repository:
 
+## Usage
 ```bash
-uv run agent.py "What does REST stand for?"
+uv run agent.py "How do you resolve a merge conflict?"
