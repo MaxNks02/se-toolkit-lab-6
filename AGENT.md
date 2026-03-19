@@ -26,6 +26,10 @@ The system prompt explicitly instructs the LLM to act as a documentation agent, 
 * **Provider:** Qwen Code API (self-hosted via proxy on a remote VM)
 * **Model:** `qwen3-coder-plus`
 * **Configuration:** Loaded from a local `.env.agent.secret` file.
+ 
+
+
+To execute the agent, use the `uv` package manager from the root of the project repository:
 
 ## Usage
 ```bash
