@@ -13,7 +13,7 @@ I will implement a new tool called `query_api` to allow the agent to interact wi
 The agent must be fully configurable via environment variables to pass the autochecker.
 * **API Keys**: `LLM_API_KEY` will be loaded from `.env.agent.secret`, while `LMS_API_KEY` will be loaded from `.env.docker.secret`.
 * **Base URL**: The agent will use `AGENT_API_BASE_URL`, defaulting to `http://localhost:42002` if the variable is not provided.
-* **Headers**: Every API call will include the `X-API-Key` header populated by `LMS_API_KEY`.
+* **Headers**: Every API call will include an Authorization: Bearer header populated by LMS_API_KEY.
 
 ## 3. Agentic Logic and System Prompt
 The system prompt will be updated to transform the agent from a documentation reader into a system troubleshooter.

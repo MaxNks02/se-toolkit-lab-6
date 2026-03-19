@@ -7,7 +7,7 @@ Originally designed as a specialized tool for navigating project documentation, 
 The core addition for Task 3 is the `query_api` tool. 
 * **Functionality**: This tool enables the agent to perform authenticated HTTP requests to the backend API to retrieve live data, such as item counts or status codes. 
 * **Authentication**: Security is strictly maintained using the `LMS_API_KEY` loaded from the `.env.docker.secret` file. 
-* **Headers**: Every request includes an `X-API-Key` header to authenticate with the backend, ensuring that only authorized agent actions are performed.
+* **Headers**: Every request includes an Authorization: Bearer header to authenticate with the backend, ensuring that only authorized agent actions are performed.
 * **Base URL**: The agent dynamically resolves the target environment using the `AGENT_API_BASE_URL` variable, which defaults to `http://localhost:42002` but is easily configurable for VM deployments.
 
 ## 3. Tool Selection and Decision Logic
