@@ -118,7 +118,7 @@ We call `.env` file ("dotenv file") a file that contains a list of [environment 
 
 Examples:
 
-- [`.env.docker.example`](../.env.docker.example)
+- [`.env.docker.example`](../.env.docker.secret)
 
 Docs:
 
