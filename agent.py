@@ -48,7 +48,11 @@ def query_api(method, path, body=None, include_auth=True):
     try:
         req = urllib.request.Request(url, data=data, headers=headers, method=method.upper())
         with urllib.request.urlopen(req, timeout=15) as response:
-            return json.dumps({"status_code": response.getcode(), "body": response.read().decode('utf-8')})
+            body_str = response.read().decode('utf-8')
+            # Truncate massive JSON responses so we don't blow up the LLM's context window
+            if len(body_str) > 15000:
+                body_str = body_str[:15000] + "... [TRUNCATED]"
+            return json.dumps({"status_code": response.getcode(), "body": body_str})
     except urllib.error.HTTPError as e:
         return json.dumps({"status_code": e.code, "body": e.read().decode('utf-8')})
     except Exception as e:
@@ -121,7 +125,6 @@ def main():
     executed_tool_calls = []
     final_json = None
 
-    # Increased loop range from 10 to 15 to allow for deep searching
     for _ in range(15):
         payload = {"model": model, "messages": messages, "tools": tools}
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -129,7 +132,6 @@ def main():
         try:
             req = urllib.request.Request(f"{api_base.rstrip('/')}/chat/completions",
                                          data=json.dumps(payload).encode('utf-8'), headers=headers, method='POST')
-            # Increased timeout to 90 seconds
             with urllib.request.urlopen(req, timeout=90) as response:
                 res_data = json.loads(response.read().decode('utf-8'))
         except Exception as e:
@@ -162,20 +164,33 @@ def main():
                 messages.append({"role": "tool", "tool_call_id": tc["id"], "name": name, "content": str(res)})
                 executed_tool_calls.append({"tool": name, "args": args, "result": res})
         else:
-            # Check if LLM output is the final JSON
-            start, end = content.find("{"), content.rfind("}")
-            if start != -1 and end != -1:
+            # Better JSON parsing to prevent text/JSON mixups from crashing the agent
+            try:
+                # Attempt 1: Parse the whole response directly
+                final_json = json.loads(content)
+                break
+            except json.JSONDecodeError:
+                # Attempt 2: Strip markdown blocks
+                cleaned = content.strip("` \n").removeprefix("json").strip()
                 try:
-                    final_json = json.loads(content[start:end + 1])
+                    final_json = json.loads(cleaned)
                     break
                 except json.JSONDecodeError:
-                    pass
+                    # Attempt 3: Specifically look for the {"answer": ... } block to avoid capturing tool output JSON
+                    start = content.rfind('{"answer"')
+                    end = content.rfind('}')
+                    if start != -1 and end > start:
+                        try:
+                            final_json = json.loads(content[start:end + 1])
+                            break
+                        except json.JSONDecodeError:
+                            pass
 
-            # The "Nudge": If no JSON and no tools, tell the LLM to get back on track
+            # If all parsing fails, nudge the LLM
             messages.append(msg)
             messages.append({
                 "role": "user",
-                "content": "SYSTEM DIRECTIVE: You provided text instead of a tool call or the final JSON. If you need to explore, CALL A TOOL. If you are finished, OUTPUT ONLY THE STRICT JSON format {\"answer\": \"...\", \"source\": \"...\"}."
+                "content": "SYSTEM DIRECTIVE: You provided text instead of a tool call or the final JSON. If you need to explore, CALL A TOOL. If you are finished, OUTPUT ONLY THE STRICT JSON format {\"answer\": \"...\", \"source\": \"...\"}. Do not add any conversational text."
             })
 
     # Cleanup format
