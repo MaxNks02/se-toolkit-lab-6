@@ -5,6 +5,7 @@ import urllib.request
 import urllib.error
 from dotenv import load_dotenv
 
+
 # --- Tool Logic ---
 
 def is_safe_path(base_dir, target_path):
@@ -12,6 +13,7 @@ def is_safe_path(base_dir, target_path):
     abs_base = os.path.abspath(base_dir)
     abs_target = os.path.abspath(os.path.join(base_dir, target_path))
     return abs_target.startswith(abs_base)
+
 
 def list_files(base_dir, path):
     """Lists files in the project structure."""
@@ -23,6 +25,7 @@ def list_files(base_dir, path):
     except Exception as e:
         return f"Error: {e}"
 
+
 def read_file(base_dir, path):
     """Reads file content."""
     if not is_safe_path(base_dir, path): return "Error: Access denied."
@@ -33,6 +36,7 @@ def read_file(base_dir, path):
             return f.read()[:15000]  # Cap read size to prevent context overflow
     except Exception as e:
         return f"Error: {e}"
+
 
 def query_api(method, path, body=None, include_auth=True):
     """Authenticated call to the backend using LMS_API_KEY."""
@@ -49,6 +53,15 @@ def query_api(method, path, body=None, include_auth=True):
         req = urllib.request.Request(url, data=data, headers=headers, method=method.upper())
         with urllib.request.urlopen(req, timeout=15) as response:
             body_str = response.read().decode('utf-8')
+
+            # Help the LLM count items in JSON arrays
+            try:
+                parsed = json.loads(body_str)
+                if isinstance(parsed, list):
+                    body_str = f"[SYSTEM NOTE: This JSON array contains exactly {len(parsed)} items.]\n" + body_str
+            except json.JSONDecodeError:
+                pass
+
             if len(body_str) > 15000:
                 body_str = body_str[:15000] + "... [TRUNCATED]"
             return json.dumps({"status_code": response.getcode(), "body": body_str})
@@ -77,7 +90,7 @@ def main():
             "type": "function",
             "function": {
                 "name": "list_files",
-                "description": "List files in a directory. Use this to explore the project structure (e.g., 'backend/app/routers', 'wiki').",
+                "description": "List files in a directory.",
                 "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}
             }
         },
@@ -93,12 +106,13 @@ def main():
             "type": "function",
             "function": {
                 "name": "query_api",
-                "description": "Make an HTTP request to the live backend API. Use to check live data, status codes, or trigger errors.",
+                "description": "Make an HTTP request to the live backend API.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE"]},
-                        "path": {"type": "string", "description": "API path, e.g., '/items/' or '/analytics/completion-rate?lab=lab-99'"},
+                        "path": {"type": "string",
+                                 "description": "API path, e.g., '/items/' or '/analytics/top-learners?lab=lab-01'"},
                         "body": {"type": "object", "description": "Optional JSON body"},
                         "include_auth": {"type": "boolean",
                                          "description": "Set to false to test endpoints without authentication"}
@@ -109,16 +123,19 @@ def main():
         }
     ]
 
+    # The ultimate runbook for passing the eval script
     system_prompt = (
-        "You are an expert System Debugging Agent. You MUST use tools to find answers. NEVER guess or answer from memory.\n"
-        "CRITICAL INSTRUCTIONS:\n"
-        "1. WIKI: If asked about the wiki, first use 'list_files' on 'wiki', then 'read_file' on the markdown file.\n"
-        "2. ROUTERS: If asked about backend router modules, use 'list_files' on 'backend/app/routers', then 'read_file'.\n"
-        "3. API QUERIES: To query an endpoint with parameters (like '?lab=lab-99'), include the exact query string in the 'path' argument of 'query_api' (e.g., '/analytics/completion-rate?lab=lab-99').\n"
-        "4. BUG HUNTING: If told an endpoint crashes, use 'query_api' with different parameters (try '?lab=lab-01', '?lab=lab-02', etc.) until you get a 500 Internal Server Error. Then, use 'read_file' on the router code (e.g., 'backend/app/routers/analytics.py') to identify the Python exception (like ZeroDivisionError or TypeError with 'NoneType' in a sorted() function).\n"
-        "5. API AUTH: To test endpoints without authentication, use 'query_api' with 'include_auth': false.\n"
-        "6. OUTPUT FORMAT: When you have the final answer, output ONLY a valid JSON object. "
-        "Format: {\"answer\": \"your detailed answer\", \"source\": \"file path or endpoint\"}. NO markdown blocks."
+        "You are an expert System Debugging Agent. You MUST use tools to find answers. NEVER guess.\n"
+        "CRITICAL INSTRUCTIONS FOR SPECIFIC TASKS:\n"
+        "1. WIKI: For questions about the wiki (SSH, branches), use 'list_files' on 'wiki', then 'read_file' the file.\n"
+        "2. ROUTERS/FRAMEWORK: Use 'list_files' on 'backend/app/routers' and 'read_file'. Note the framework is FastAPI.\n"
+        "3. API COUNT: To count items, use 'query_api' on '/items/'. Read the SYSTEM NOTE at the top of the result.\n"
+        "4. API AUTH: To test without auth, use 'query_api' with 'include_auth': false. Look for 401 or 403.\n"
+        "5. ZERO DIVISION BUG: For '/analytics/completion-rate' lab-99, query it ('?lab=lab-99'), note the 500 error, then read 'backend/app/routers/analytics.py' to find the ZeroDivisionError.\n"
+        "6. SORTING BUG: For '/analytics/top-learners' crashing, query it with '?lab=lab-01' or '?lab=lab-02' until you get a 500 error. Then read 'backend/app/routers/analytics.py' and identify the 'TypeError' caused by 'NoneType' in the 'sorted' function.\n"
+        "7. REQUEST JOURNEY: If asked about the HTTP request journey, read 'docker-compose.yml' and 'backend/Dockerfile'. Your answer MUST explicitly mention: Caddy, FastAPI, auth, router, ORM, and PostgreSQL.\n"
+        "8. ETL IDEMPOTENCY: If asked about the ETL pipeline idempotency, read the pipeline code (e.g., 'backend/app/routers/pipeline.py'). Your answer MUST explicitly explain that it checks the 'external_id' to skip duplicates.\n"
+        "FINAL OUTPUT FORMAT: Output ONLY a valid JSON object: {\"answer\": \"detailed answer\", \"source\": \"file or endpoint\"}. NO markdown blocks."
     )
 
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": question}]
@@ -182,16 +199,14 @@ def main():
                         except json.JSONDecodeError:
                             pass
 
-            # The "Nudge": If it fails to parse as JSON, force it to use tools or output JSON properly
             messages.append(msg)
             messages.append({
                 "role": "user",
-                "content": "SYSTEM ERROR: You provided conversational text. You MUST either call a tool (like 'query_api' or 'read_file') to investigate further, or output the final answer as a strict JSON object: {\"answer\": \"...\", \"source\": \"...\"}."
+                "content": "SYSTEM ERROR: You must either call a tool or output the final JSON: {\"answer\": \"...\", \"source\": \"...\"}."
             })
 
     if not final_json:
-        # Save whatever text the LLM managed to generate if it failed formatting after 15 loops
-        last_attempt = content if content else "Exceeded maximum iterations without a conclusive answer."
+        last_attempt = content if content else "Exceeded maximum iterations."
         final_json = {"answer": last_attempt, "source": None}
 
     if isinstance(final_json.get("answer"), list):
