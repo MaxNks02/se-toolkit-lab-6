@@ -115,7 +115,7 @@ def main():
         "1. WIKI: If asked about the wiki, first use 'list_files' on 'wiki', then 'read_file' on the markdown file.\n"
         "2. ROUTERS: If asked about backend router modules, use 'list_files' on 'backend/app/routers', then 'read_file'.\n"
         "3. API QUERIES: To query an endpoint with parameters (like '?lab=lab-99'), include the exact query string in the 'path' argument of 'query_api' (e.g., '/analytics/completion-rate?lab=lab-99').\n"
-        "4. BUG HUNTING: If an API query returns an error (like a 500 status code), you MUST use 'read_file' to read the corresponding router source code (e.g., 'backend/app/routers/analytics.py') to find the exact Python exception (like ZeroDivisionError or TypeError) and the buggy line of code.\n"
+        "4. BUG HUNTING: If told an endpoint crashes, use 'query_api' with different parameters (try '?lab=lab-01', '?lab=lab-02', etc.) until you get a 500 Internal Server Error. Then, use 'read_file' on the router code (e.g., 'backend/app/routers/analytics.py') to identify the Python exception (like ZeroDivisionError or TypeError with 'NoneType' in a sorted() function).\n"
         "5. API AUTH: To test endpoints without authentication, use 'query_api' with 'include_auth': false.\n"
         "6. OUTPUT FORMAT: When you have the final answer, output ONLY a valid JSON object. "
         "Format: {\"answer\": \"your detailed answer\", \"source\": \"file path or endpoint\"}. NO markdown blocks."
