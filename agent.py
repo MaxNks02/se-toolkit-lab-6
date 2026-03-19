@@ -143,7 +143,13 @@ def main():
     final_json = None
 
     for _ in range(15):
-        payload = {"model": model, "messages": messages, "tools": tools}
+        # ---> TEMPERATURE SET TO 0.0 HERE TO FIX FLAKINESS <---
+        payload = {
+            "model": model,
+            "messages": messages,
+            "tools": tools,
+            "temperature": 0.0
+        }
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
         try:
