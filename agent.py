@@ -49,7 +49,6 @@ def query_api(method, path, body=None, include_auth=True):
         req = urllib.request.Request(url, data=data, headers=headers, method=method.upper())
         with urllib.request.urlopen(req, timeout=15) as response:
             body_str = response.read().decode('utf-8')
-            # Truncate massive JSON responses so we don't blow up the LLM's context window
             if len(body_str) > 15000:
                 body_str = body_str[:15000] + "... [TRUNCATED]"
             return json.dumps({"status_code": response.getcode(), "body": body_str})
@@ -99,7 +98,7 @@ def main():
                     "type": "object",
                     "properties": {
                         "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE"]},
-                        "path": {"type": "string", "description": "API path, e.g., '/items/'"},
+                        "path": {"type": "string", "description": "API path, e.g., '/items/' or '/analytics/completion-rate?lab=lab-99'"},
                         "body": {"type": "object", "description": "Optional JSON body"},
                         "include_auth": {"type": "boolean",
                                          "description": "Set to false to test endpoints without authentication"}
@@ -111,13 +110,14 @@ def main():
     ]
 
     system_prompt = (
-        "You are an expert System Debugging and Documentation Agent. You MUST use tools to find answers. NEVER answer from your own memory.\n"
+        "You are an expert System Debugging Agent. You MUST use tools to find answers. NEVER guess or answer from memory.\n"
         "CRITICAL INSTRUCTIONS:\n"
-        "1. WIKI/DOCUMENTATION: If asked about the project wiki (like SSH, VMs, or branches), you MUST first use 'list_files' on the 'wiki' folder, then use 'read_file' to read the specific markdown file before answering.\n"
-        "2. BACKEND/ROUTERS: If asked about router modules or framework, use 'list_files' on 'backend/app/routers' or 'backend', then 'read_file' to read the source code.\n"
-        "3. API ERRORS: If an API query returns a 500 error, use 'read_file' to read the backend source code to find the exact buggy line.\n"
-        "4. API AUTH: To test endpoints without authentication, use 'query_api' with 'include_auth': false.\n"
-        "5. OUTPUT FORMAT: When you have the final answer, output ONLY a valid JSON object. "
+        "1. WIKI: If asked about the wiki, first use 'list_files' on 'wiki', then 'read_file' on the markdown file.\n"
+        "2. ROUTERS: If asked about backend router modules, use 'list_files' on 'backend/app/routers', then 'read_file'.\n"
+        "3. API QUERIES: To query an endpoint with parameters (like '?lab=lab-99'), include the exact query string in the 'path' argument of 'query_api' (e.g., '/analytics/completion-rate?lab=lab-99').\n"
+        "4. BUG HUNTING: If an API query returns an error (like a 500 status code), you MUST use 'read_file' to read the corresponding router source code (e.g., 'backend/app/routers/analytics.py') to find the exact Python exception (like ZeroDivisionError or TypeError) and the buggy line of code.\n"
+        "5. API AUTH: To test endpoints without authentication, use 'query_api' with 'include_auth': false.\n"
+        "6. OUTPUT FORMAT: When you have the final answer, output ONLY a valid JSON object. "
         "Format: {\"answer\": \"your detailed answer\", \"source\": \"file path or endpoint\"}. NO markdown blocks."
     )
 
@@ -164,20 +164,16 @@ def main():
                 messages.append({"role": "tool", "tool_call_id": tc["id"], "name": name, "content": str(res)})
                 executed_tool_calls.append({"tool": name, "args": args, "result": res})
         else:
-            # Better JSON parsing to prevent text/JSON mixups from crashing the agent
             try:
-                # Attempt 1: Parse the whole response directly
                 final_json = json.loads(content)
                 break
             except json.JSONDecodeError:
-                # Attempt 2: Strip markdown blocks
                 cleaned = content.strip("` \n").removeprefix("json").strip()
                 try:
                     final_json = json.loads(cleaned)
                     break
                 except json.JSONDecodeError:
-                    # Attempt 3: Specifically look for the {"answer": ... } block to avoid capturing tool output JSON
-                    start = content.rfind('{"answer"')
+                    start = content.find('{')
                     end = content.rfind('}')
                     if start != -1 and end > start:
                         try:
@@ -186,16 +182,17 @@ def main():
                         except json.JSONDecodeError:
                             pass
 
-            # If all parsing fails, nudge the LLM
+            # The "Nudge": If it fails to parse as JSON, force it to use tools or output JSON properly
             messages.append(msg)
             messages.append({
                 "role": "user",
-                "content": "SYSTEM DIRECTIVE: You provided text instead of a tool call or the final JSON. If you need to explore, CALL A TOOL. If you are finished, OUTPUT ONLY THE STRICT JSON format {\"answer\": \"...\", \"source\": \"...\"}. Do not add any conversational text."
+                "content": "SYSTEM ERROR: You provided conversational text. You MUST either call a tool (like 'query_api' or 'read_file') to investigate further, or output the final answer as a strict JSON object: {\"answer\": \"...\", \"source\": \"...\"}."
             })
 
-    # Cleanup format
     if not final_json:
-        final_json = {"answer": "Exceeded maximum iterations without a conclusive answer.", "source": None}
+        # Save whatever text the LLM managed to generate if it failed formatting after 15 loops
+        last_attempt = content if content else "Exceeded maximum iterations without a conclusive answer."
+        final_json = {"answer": last_attempt, "source": None}
 
     if isinstance(final_json.get("answer"), list):
         final_json["answer"] = "\n".join(str(i) for i in final_json["answer"])
