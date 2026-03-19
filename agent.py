@@ -1,7 +1,6 @@
 import sys
 import json
 import os
-import re
 import urllib.request
 import urllib.error
 from dotenv import load_dotenv
@@ -34,8 +33,7 @@ def read_file(base_dir, path):
     if not os.path.exists(target): return f"Error: File '{path}' not found."
     try:
         with open(target, 'r', encoding='utf-8') as f:
-            # Reduced to 10k to protect context window during long loops
-            return f.read()[:10000]
+            return f.read()[:10000]  # Cap at 10k to prevent context window overflow
     except Exception as e:
         return f"Error: {e}"
 
@@ -56,7 +54,7 @@ def query_api(method, path, body=None, include_auth=True):
         with urllib.request.urlopen(req, timeout=15) as response:
             body_str = response.read().decode('utf-8')
 
-            # Help the LLM count items in JSON arrays natively
+            # Inject a system note to help the LLM count items without math hallucination
             try:
                 parsed = json.loads(body_str)
                 if isinstance(parsed, list):
@@ -87,13 +85,12 @@ def main():
     api_base = os.getenv("LLM_API_BASE")
     model = os.getenv("LLM_MODEL")
 
-    # Improved tool descriptions to guide LLM naturally
     tools = [
         {
             "type": "function",
             "function": {
                 "name": "list_files",
-                "description": "List files in a directory. Use to explore project structure (e.g., 'wiki', 'backend').",
+                "description": "List files in a directory. Use to explore project structure.",
                 "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}
             }
         },
@@ -101,7 +98,7 @@ def main():
             "type": "function",
             "function": {
                 "name": "read_file",
-                "description": "Read source code or documentation. Use to inspect code for bugs or trace architecture.",
+                "description": "Read source code or documentation. Use to inspect code or read wiki pages.",
                 "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}
             }
         },
@@ -109,7 +106,7 @@ def main():
             "type": "function",
             "function": {
                 "name": "query_api",
-                "description": "Make an HTTP request to the live backend API. Use to count items, test auth (include_auth=false), or trigger 500 errors to diagnose bugs.",
+                "description": "Make an HTTP request to the live backend API. Use to count items, check endpoints, or trigger errors.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -126,24 +123,30 @@ def main():
         }
     ]
 
-    # Generalized runbook: Teaches STRATEGIES, not the answers themselves
+    # The aggressive System Prompt designed to stop "chatty" LLMs
     system_prompt = (
-        "You are an expert System Debugging Agent. You MUST use tools to find answers. NEVER guess.\n"
-        "CRITICAL STRATEGIES:\n"
-        "1. WIKI: Use 'list_files' on 'wiki', then 'read_file'.\n"
-        "2. FRAMEWORK/ROUTERS: Use 'list_files' on 'backend/app/routers' and 'read_file' to identify frameworks and domains.\n"
-        "3. API COUNT: Use 'query_api' on '/items/'. Read the SYSTEM NOTE at the top for the exact count.\n"
-        "4. BUG HUNTING (500 Errors): Query the endpoint with different parameters (e.g., '?lab=lab-99' or '?lab=lab-01') until it crashes. Then 'read_file' the router source code to find the exact Python exception (e.g., ZeroDivisionError, TypeError) and explain it.\n"
-        "5. ARCHITECTURE: To explain a request journey or architecture, read 'docker-compose.yml' and 'backend/Dockerfile' to find all components (proxy, web server, db, etc.).\n"
-        "6. IDEMPOTENCY: To explain how pipelines avoid duplicates, 'read_file' the pipeline code and find the exact field used for checking.\n"
-        "FINAL OUTPUT FORMAT: Output ONLY a valid JSON object: {\"answer\": \"detailed answer\", \"source\": \"file or endpoint\"}."
+        "You are an autonomous System Debugging Agent. You MUST use tools to find answers. NEVER guess.\n"
+        "STRICT BEHAVIORAL RULES:\n"
+        "1. NO CHATTING: Never output conversational text, inner monologue, or explanations. Do not say 'I will now look at...'\n"
+        "2. To explore, you MUST trigger a tool call via the JSON schema.\n"
+        "3. If a file doesn't contain the answer, use list_files to look for other files.\n"
+        "STRATEGIES:\n"
+        "- WIKI: 'list_files' on 'wiki', then 'read_file'.\n"
+        "- ROUTERS/FRAMEWORK: 'list_files' on 'backend/app/routers', then 'read_file'. Note the framework used in main files.\n"
+        "- API COUNT: 'query_api' on '/items/'.\n"
+        "- BUG HUNTING (500 Errors): 'query_api' the endpoint with parameters (like '?lab=lab-01' or '?lab=lab-99') until it crashes. Then 'read_file' the router source code to find the exact Python exception (e.g., TypeError, ZeroDivisionError).\n"
+        "- ARCHITECTURE: 'read_file' on 'docker-compose.yml' and 'backend/Dockerfile'.\n"
+        "- PIPELINE: 'read_file' on 'backend/app/routers/pipeline.py' to see how duplicates are avoided.\n"
+        "FINAL OUTPUT FORMAT:\n"
+        "When you are finished, output ONLY a JSON object exactly like this:\n"
+        "{\"answer\": \"detailed final answer\", \"source\": \"file path or endpoint\"}"
     )
 
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": question}]
     executed_tool_calls = []
     final_json = None
 
-    for _ in range(15):
+    for loop_num in range(15):
         payload = {
             "model": model,
             "messages": messages,
@@ -165,6 +168,11 @@ def main():
         content = (msg.get("content") or "").strip()
         msg["content"] = content
 
+        # Debug logging to stderr (won't break the eval script JSON parsing)
+        print(f"\n[DEBUG] Loop {loop_num + 1}:", file=sys.stderr)
+        if content:
+            print(f"[DEBUG] Content: {content[:150]}...", file=sys.stderr)
+
         if msg.get("tool_calls"):
             messages.append(msg)
             for tc in msg["tool_calls"]:
@@ -173,6 +181,8 @@ def main():
                     args = json.loads(tc["function"]["arguments"])
                 except:
                     args = {}
+
+                print(f"[DEBUG] Tool Call: {name} {args}", file=sys.stderr)
 
                 if name == "list_files":
                     res = list_files(project_root, args.get("path", ""))
@@ -187,19 +197,29 @@ def main():
                 messages.append({"role": "tool", "tool_call_id": tc["id"], "name": name, "content": str(res)})
                 executed_tool_calls.append({"tool": name, "args": args, "result": res})
         else:
-            # Enhanced Robust JSON Parsing using Regular Expressions
-            match = re.search(r'\{.*\}', content, re.DOTALL)
-            if match:
-                try:
-                    final_json = json.loads(match.group(0))
-                    break
-                except json.JSONDecodeError:
-                    pass
+            # Bulletproof JSON extraction: searches for the exact object structure even if wrapped in chat text
+            try:
+                start_idx = content.find('{"answer"')
+                if start_idx == -1:
+                    start_idx = content.find('{"answer":')
 
+                if start_idx != -1:
+                    end_idx = content.rfind('}')
+                    if end_idx > start_idx:
+                        final_json = json.loads(content[start_idx:end_idx + 1])
+                        break
+
+                # Fallback purely to JSON parse
+                final_json = json.loads(content)
+                break
+            except json.JSONDecodeError:
+                pass
+
+            # Nudge the LLM aggressively if it breaks rules
             messages.append(msg)
             messages.append({
                 "role": "user",
-                "content": "SYSTEM ERROR: You must either call a tool or output the final JSON: {\"answer\": \"...\", \"source\": \"...\"}."
+                "content": "SYSTEM ERROR: You output plain text without calling a tool or providing the final JSON. DO NOT explain your thoughts. EITHER call a tool using the JSON schema OR output the final {\"answer\": \"...\", \"source\": \"...\"} object."
             })
 
     if not final_json:
@@ -216,6 +236,8 @@ def main():
                 break
 
     final_json["tool_calls"] = executed_tool_calls
+
+    # Final output must be printed to stdout cleanly
     print(json.dumps(final_json))
 
 
